@@ -151,7 +151,7 @@ Books Book1,Book2;
 
 ## 总结
 
-第一篇文章简单介绍了下Redis源码的核心以及Redis为什么字典数据库，后面一步一步深入Redis，体会Redis设计精髓和伟大。
+第一篇文章简单介绍了下Redis源码的核心以及Redis为什么是字典数据库，后面一步一步深入Redis，体会Redis设计精髓和伟大。
 
 
 
