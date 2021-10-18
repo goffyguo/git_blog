@@ -43,7 +43,7 @@ private static class Node<V> {
 
 每一个 node 可以看成就是一个单词，为什么不存储一整个单词呢？因为从上面（根节点）开始，每个单词字母已经存储过了，没必要再存储一遍，但是我们需要有一个字母，也就是需要有一个 character
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20211006172726883.png" alt="image-20211006172726883" style="zoom:50%;" />
+![](../imgs/image-20211006172726883.png)
 
 Trie Tree 的根节点不包含任何信息，第一个字符串为 add，第一个字母为 a,因此根节点的的字节点肯定不为空，也就是 HashMap<Character, Node<V>> children，Character 不为空，其他同理。
 
