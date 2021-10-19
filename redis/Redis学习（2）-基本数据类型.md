@@ -47,7 +47,7 @@ value既不是直接作为字符串存储，也不是直接存储在SDS中，而
 
 大概的图示是这样的：
 
-![image-20211013105023932](/Users/guogoffy/Library/Application Support/typora-user-images/image-20211013105023932.png)
+![image-20211013105023932](../imgs/image-20211013105023932.png)
 
 然后再分别查看一下这个key的类型、编码、debug结构：
 
@@ -198,7 +198,7 @@ OK
 
    首先需要明确的是，严格来说，C语言中并没有字符串这样的概念，它是将字符串作为字符数组来处理的，默认使用`\0`放在结尾来表示一个字符串。类似于这样：
 
-   ![image-20211014104233083](/Users/guogoffy/Library/Application Support/typora-user-images/image-20211014104233083.png)
+   ![image-20211014104233083](../imgs/image-20211014104233083.png)
 
    如果需要获取Redis这个字符串的长度，需要从头开始遍历，直到遇到 `\0`为止。
 
@@ -274,7 +274,7 @@ OK
 
 6. 源码分析
 
-   <img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20211014134738329.png" alt="image-20211014134738329" style="zoom:50%;" />
+   ![](../imgs/image-20211014134738329.png)
 
    输入set命令之后后面为什么会有后面这一段提示关键字呢，带着这个问题可以去源码（t_string.c）里面看看
 
@@ -385,7 +385,7 @@ OK
 
    当输入`set k1 123`命令的时候，如果这个键值的内容可以用一个64位有符号整形来表示时，Redis会将键值转化为long型来存储，此时即对应OBJ_ENCODING_INT编码类型。而且更重要的是Redis在启动时会预先建立10000（为什么是10000，稍后解释）个分别存储0～9999的redisObject变量作为共享对象，这就意味着如果set字符串的键值在0～10000之间的话，则可以直接指向共享对象而不需要再建立新对象，此时，键值就不需要再占用内存空间。相应的图示：
 
-   ![image-20211014142747301](/Users/guogoffy/Library/Application Support/typora-user-images/image-20211014142747301.png)
+   ![image-20211014142747301](../imgs/image-20211014142747301.png)
 
    处理编码的源码（object.c）：
 
@@ -551,7 +551,7 @@ OK
 
    图示大概是这样表示：
 
-   ![image-20211014145137598](/Users/guogoffy/Library/Application Support/typora-user-images/image-20211014145137598.png)
+   ![image-20211014145137598](../imgs/image-20211014145137598.png)
 
    还有一点需要注意的是，有时候没有超过字符串的键值长度大于44这个阈值时，这个键值的编码类型也变成了 RAW了，类似于这样：
 
@@ -590,6 +590,261 @@ OK
 #### 列表（t_list.c）
 
 #### 字典（t_hash.c）
+
+Redis hash 看起来就像一个 “hash” 的样子，由键值对组成：
+
+```shell
+127.0.0.1:6379> hmset user:1000 username antirez birthday 197 verified 1
+OK
+127.0.0.1:6379> hget user:1000 username
+"antirez"
+127.0.0.1:6379> hgetall user:1000
+1) "username"
+2) "antirez"
+3) "birthday"
+4) "197"
+5) "verified"
+6) "1"
+127.0.0.1:6379> 
+```
+
+关于hash有两个重要的配置参数：
+
+```shell
+127.0.0.1:6379> config get hash*
+1) "hash-max-ziplist-entries"
+2) "512"
+3) "hash-max-ziplist-value"
+4) "64"
+127.0.0.1:6379> 
+```
+
+**hash-max-ziplist-entries**：使用压缩列表保存时哈希集合中的最大元素个数
+
+**hash-max-ziplist-value**：使用压缩列表保存时哈希集合中单个元素的最大长度
+
+Hash类型键的字段个数  小于  hash-max-ziplist-entries 并且每个字段名和字段值的长度  小于  hash-max-ziplist-value 时，Redis才会使用 OBJ_ENCODING_ZIPLIST来存储该键，前述条件任意一个不满足则会转换为 OBJ_ENCODING_HT的编码方式
+
+示例如下：
+
+```shell
+127.0.0.1:6379> object encoding user:1000
+"ziplist"
+127.0.0.1:6379> type user:1000
+hash
+127.0.0.1:6379> config set hash-max-ziplist-entries 4
+OK
+127.0.0.1:6379> config set hash-max-ziplist-value 4
+OK
+127.0.0.1:6379> config get hash*
+1) "hash-max-ziplist-entries"
+2) "4"
+3) "hash-max-ziplist-value"
+4) "4"
+127.0.0.1:6379> hset person id 1 name guo
+(integer) 2
+127.0.0.1:6379> type person
+hash
+127.0.0.1:6379> objcet encoding person
+(error) ERR unknown command `objcet`, with args beginning with: `encoding`, `person`, 
+127.0.0.1:6379> object encoding person
+"ziplist"
+127.0.0.1:6379> hset person id 1 name guo age 25 score 99 birth 2021
+(integer) 3
+127.0.0.1:6379> object encoding person
+"hashtable"
+127.0.0.1:6379> hset person id 1 name guogu
+(integer) 2
+127.0.0.1:6379> object encoding person
+"hashtable"
+```
+
+结论：
+
+1. 哈希对象保存的键值对数量小于512个
+2. 所有的键值对象的键和值的字符串对象长度都小于等于64byte（一个英文字母一个字节）是用ziplist，反之用hashtable
+3. ziplist升级到hashtable可以，反过来降级不可以
+
+源码分析：
+
+- ziplist
+
+  ziplist压缩列表是一种紧凑编码格式，总体思想：多花时间来换取节约空间。即：以少部分读写性能为代价，来换取极高的内存空间利用率，因此，只会用于字段个数少，且字段值也较小的场景。这个特性主要与连续内存的特性是分不开的，之前学习GC垃圾回收机制：标记-压缩算法的底层其实就是利用了ziplist。当一个hash对象只包含少量键值对且每个键值对的键和值要么就是小整数要么就是长度比较短的字符串，那么它就适合使用ziplist作为底层实现。
+
+  ```c
+   /*The ziplist is a specially encoded dually linked list that is designed
+   * to be very memory efficient. It stores both strings and integer values,
+   * where integers are encoded as actual integers instead of a series of
+   * characters. It allows push and pop operations on either side of the list
+   * in O(1) time. However, because every operation requires a reallocation of
+   * the memory used by the ziplist, the actual complexity is related to the
+   * amount of memory used by the ziplist.
+   */
+  // 这是源码的一部分注释（ziplist.c）
+  ```
+
+  ziplist是一个经过特殊编码的双向链表，它不存储指向上一个链表节点和指向下一个链表节点的指针，而是存储上一个节点长度和当前节点长度，通过牺牲部分读写性能，来换取高效的内存空间利用率，节约内存，是一种时间换空间的思想。前面说过了，只用在字段个数小，字段值小的场景里面。
+
+  ```c
+  <zlbytes> <zltail> <zllen> <entry> <entry> ... <entry> <zlend>
+  ```
+
+  图示：
+
+  <img src="../imgs/image-20211019145628784.png" alt="image-20211019145628784" style="zoom:50%;" />
+
+  上述图示可以分为3大部分，分别是header+entry集合+end，其实header由zlbytes、zltail和zllen组成，entry是节点，zlend是一个单字节255（1111 1111），用作ziplist的结尾标识符。
+
+  - zlbytes：4字节，记录整个压缩列表占用的内存字节数
+  - zltail：4字节，记录压缩列表表尾节点的位置
+  - zllen：2字节，记录压缩列表节点个数
+  - entry：列表节点，长度不定，由内容决定
+  - zlend：1字节，0xFF 标记压缩的结束（16进制FF对应二进制1111 1111，十进制255）
+
+  数据结构：
+
+  ```c
+  
+  /* We use this function to receive information about a ziplist entry.
+   * Note that this is not how the data is actually encoded, is just what we
+   * get filled by a function in order to operate more easily. */
+  typedef struct zlentry {
+    	/* 上一个链表节点占用的长度 */
+      unsigned int prevrawlensize; /* Bytes used to encode the previous entry len*/
+    	/* 存储上一个链表节点的长度数值所需要的字节数（上一个节点的长度） */
+      unsigned int prevrawlen;     /* Previous entry len. */
+    	/* 存储当前链表节点长度数值所需要的字节数 */
+      unsigned int lensize;        /* Bytes used to encode this entry type/len.
+                                      For example strings have a 1, 2 or 5 bytes
+                                      header. Integers always use a single byte.*/
+    	/* 当前链表节点占用的长度 */
+      unsigned int len;            /* Bytes used to represent the actual entry.
+                                      For strings this is just the string length
+                                      while for integers it is 1, 2, 3, 4, 8 or
+                                      0 (for 4 bit immediate) depending on the
+                                      number range. */
+    	/* 当前链表节点的头部大小=prevrawlensize + lensize，即非数据域的大小 */
+      unsigned int headersize;     /* prevrawlensize + lensize. */
+    	/* 编码方式 */
+      unsigned char encoding;      /* Set to ZIP_STR_* or ZIP_INT_* depending on
+                                      the entry encoding. However for 4 bits
+                                      immediate integers this can assume a range
+                                      of values and must be range-checked. */
+    	/* 压缩链表以字符串的形式保存，该指针指向当前节点起始位置 */
+      unsigned char *p;            /* Pointer to the very start of the entry, that
+                                      is, this points to prev-entry-len field. */
+  } zlentry;
+  ```
+
+  压缩列表zlentry节点结构：每个zlentry由前一个节点的长度、encoding和entry-data三部分组成
+
+  - 前节点：表示前1个zlentry的长度，prev_len有两种取值情况： 1字节或5字节 。取值1字节时，表示上一个entry的长度小于254字节。虽然1字节的值能表示的数值范围是0到255，但是压缩列表中zlend的取值默认是255，因此，就默认用255表示整个压缩列表的结束，其他表示长度的地方就不能再用255这个值了。所以，当上一个entry长度小于254字节时，prev_len取值为1字节，否则，就取值为5字节。
+  - enncoding： 记录节点的content保存数据的类型和长度。
+  - entry-data： 保存实际数据内容
+
+  ![image-20211019151411848](../imgs/image-20211019151411848.png)
+
+  压缩列表的遍历：通过指向表尾节点的位置指针p1, 减去节点的previous_entry_length，得到前一个节点起始地址的指针。如此循环，从表尾遍历到表头节点。从表尾向表头遍历操作就是使用这一原理实现的，只要我们拥有了一个指向某个节点起始地址的指针，那么通过这个指针以及这个节点的previous_entry_length属性程序就可以一直向前一个节点回溯，最终到达压缩列表的表头节点。
+
+  使用压缩列表的好处（相比于链表）：
+
+  1. 普通的双向链表会有两个指针，在存储数据很小的情况下，存储的实际数据的大小可能还没有指针占用的内存大，得不偿失。ziplist 是一个特殊的双向链表没有维护双向指针:prev next；而是存储上一个 entry的长度和 当前entry的长度，通过长度推算下一个元素在什么地方。牺牲读取的性能，获得高效的存储空间，因为(简短字符串的情况)存储指针比存储entry长度更费内存。这是典型的“时间换空间”。 
+  2. 链表在内存中一般是不连续的，遍历相对比较慢，而ziplist可以很好的解决这个问题，普通数组的遍历是根据数组里存储的数据类型找到下一个元素的(例如int类型的数组访问下一个元素时每次只需要移动一个sizeof(int)就行)，但是ziplist的每个节点的长度是可以不一样的，而我们面对不同长度的节点又不可能直接sizeof(entry)，所以ziplist只好将一些必要的偏移量信息记录在了每一个节点里，使之能跳到上一个节点或下一个节点。
+  3. 头节点里有头节点里同时还有一个参数 len，和string类型提到的 SDS 类似，这里是用来记录链表长度的。获取链表长度时不用再遍历整个链表，直接拿到len值就可以了，这个时间复杂度是 O(1)。
+
+- hash
+
+  在Redis中，hashTable被称为字典（dictionary），是一个数组+链表的结构
+
+  ```c
+  void hsetCommand(client *c) {
+      int i, created = 0;
+      robj *o;
+  
+      if ((c->argc % 2) == 1) {
+          addReplyErrorFormat(c,"wrong number of arguments for '%s' command",c->cmd->name);
+          return;
+      }
+  
+      if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
+      hashTypeTryConversion(o,c->argv,2,c->argc-1);
+  
+      for (i = 2; i < c->argc; i += 2)
+          created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY);
+  
+      /* HMSET (deprecated) and HSET return value is different. */
+      char *cmdname = c->argv[0]->ptr;
+      if (cmdname[1] == 's' || cmdname[1] == 'S') {
+          /* HSET */
+          addReplyLongLong(c, created);
+      } else {
+          /* HMSET */
+          addReply(c, shared.ok);
+      }
+      signalModifiedKey(c,c->db,c->argv[1]);
+      notifyKeyspaceEvent(NOTIFY_HASH,"hset",c->argv[1],c->db->id);
+      server.dirty += (c->argc - 2)/2;
+  }
+  ```
+
+  之前我们说过有多种编码方式，其中的OBJ_ENCODING_HT 这种编码方式内部才是真正的哈希表结构，或称为字典结构，其可以实现O(1)复杂度的读写操作，因此效率很高。
+
+  在 Redis内部，从 OBJ_ENCODING_HT类型到底层真正的散列表数据结构是一层层嵌套下去的，组织关系如图：
+
+  
+
+  ![image-20211019165425711](../imgs/image-20211019165425711.png)
+
+  也就是说从宏观的编码开始，先是转化字典，而字典的底层又是哈希表，哈希表里面又存了一个个的哈希节点
+
+  ```c
+  typedef struct dictEntry { //1、哈希节点
+      void *key;
+      union {
+          void *val;
+          uint64_t u64;
+          int64_t s64;
+          double d;
+      } v;
+      struct dictEntry *next;     /* Next entry in the same hash bucket. */
+      void *metadata[];           /* An arbitrary number of bytes (starting at a
+                                   * pointer-aligned address) of size as returned
+                                   * by dictType's dictEntryMetadataBytes(). */
+  } dictEntry;
+  
+  typedef struct dict dict;
+  
+  typedef struct dictType {
+      uint64_t (*hashFunction)(const void *key);
+      void *(*keyDup)(dict *d, const void *key);
+      void *(*valDup)(dict *d, const void *obj);
+      int (*keyCompare)(dict *d, const void *key1, const void *key2);
+      void (*keyDestructor)(dict *d, void *key);
+      void (*valDestructor)(dict *d, void *obj);
+      int (*expandAllowed)(size_t moreMem, double usedRatio);
+      /* Allow a dictEntry to carry extra caller-defined metadata.  The
+       * extra memory is initialized to 0 when a dictEntry is allocated. */
+      size_t (*dictEntryMetadataBytes)(dict *d);
+  } dictType;
+  
+  #define DICTHT_SIZE(exp) ((exp) == -1 ? 0 : (unsigned long)1<<(exp)) // 2、哈希表
+  #define DICTHT_SIZE_MASK(exp) ((exp) == -1 ? 0 : (DICTHT_SIZE(exp))-1)
+  
+  struct dict { // 3、字典
+      dictType *type;
+  
+      dictEntry **ht_table[2];
+      unsigned long ht_used[2];
+  
+      long rehashidx; /* rehashing not in progress if rehashidx == -1 */
+  
+      /* Keep small vars at end for optimal (minimal) struct padding */
+      int16_t pauserehash; /* If >0 rehashing is paused (<0 indicates coding error) */
+      signed char ht_size_exp[2]; /* exponent of size. (size = 1<<exp) */
+  };
+  ```
+
+总结：简单来说就是类似于String，只不过String使用了不同的编码格式，而hash使用了不同的数据结构，而做这些的目的都是为了实现Redis高性能的特性
 
 #### 集合及有序集合（t_set.c和t_zset.c）
 
