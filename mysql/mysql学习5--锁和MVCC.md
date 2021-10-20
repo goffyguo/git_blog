@@ -121,11 +121,11 @@ MySQL 中实现的多版本两阶段锁协议（Multiversion 2PL）将 MVCC 和 
 
 假设现在有一个事务A(id=50)，插入了一条数据，那么此时这条数据的隐藏字段以及指向的undo log如下图所示，插入的这个数据的值是指A，因为事务A的id是50，所以这条数据的trx_id就是50，roll_pointer指向一个空的undo log，因为之前是没有这条数据的。
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926103057019.png" alt="image-20210926103057019" style="zoom:50%;" />
+![image-20210926103057019](../imgs/image-20210926103057019.png)
 
 接着假设有一个事务B修改了这条数据，把值A修改成了值B，事务的id是58，那么此时更新之前会生成一个undo log记录之前的值，然后会让roll_pointer指向这个实际的undo log回滚日志，具体就是图中这样：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926105800971.png" alt="image-20210926105800971" style="zoom:50%;" />
+![image-20210926105800971](../imgs/image-20210926105800971.png)
 
 注：`图中事务A（id=58）应为事务B（id=58）`
 
@@ -133,7 +133,7 @@ MySQL 中实现的多版本两阶段锁协议（Multiversion 2PL）将 MVCC 和 
 
 假设接着事务C又来修改了这个值，修改为值C，它的事务id是69，此时就会把数据行里的trx_id改成69，然后生成一条undo log，记录之前事务B修改的那个值，图示这样：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926114956930.png" alt="image-20210926114956930" style="zoom:50%;" />
+![image-20210926114956930](../imgs/image-20210926114956930.png)
 
 图中可以清晰的看到，数据行里的值变成了值C，trx_id是事务C的id，也就是69，然后roll_pointer指向了本次修改之前生成的undo_log，也就是记录了事务B修改的那个值，包括事务B的事务id，同时事务B修改的那个undo_log还串联了最早事务A插入的那个undo_log，如图中所示，过程很清晰。
 
@@ -174,27 +174,27 @@ ReadView概念中有4个比较重要的内容：
 
 假设原来数据库就有一行数据，很早之前就有事务插入过了，事务id是32，他的值就是初始值，如下图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926142532707.png" alt="image-20210926142532707" style="zoom:50%;" />
+![image-20210926142532707](../imgs/image-20210926142532707.png)
 
 接着，此时两个事务并发过来执行了，一个是事务A(id=45)，一个是事务B(id=59)，事务B要去更新这行数据，事务A要去读取这行数据，如图所示：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926142759110.png" alt="image-20210926142759110" style="zoom:50%;" />
+![image-20210926142759110](../imgs/image-20210926142759110.png)
 
 现在事务A直接开启一个Readview，这个Readview里的m_ids就包含了事务A和事务B的两个事务id，45和59，然后min_tx_id就是45，max_trx_id就是60，creator_trx_id就是45，就是事务A自己。
 
 这个时候事务A第一次查询这行数据，会走一个判断，就是判断一下当前这行数据的trx_id是否小于Readview中的min_tx_id，此时发现trx_id是32，是小于ReadView里的min_tx_id就是45的，说明事务开启之前，修改这行数据的事务早就提交了，所以此时可以查到这行数据，如图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926143426539.png" alt="image-20210926143426539" style="zoom:50%;" />
+![image-20210926143426539](../imgs/image-20210926143426539.png)
 
 接着事务B开始修改了，他把这行数据的值修改为了值B，然后这行数据的trx_id设置为自己的id，也就是59，同时roll_pointer指向了修改之前生成的一个undo log，接着这个事务B就提交了，如图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926143741541.png" alt="image-20210926143741541" style="zoom:50%;" />
+![image-20210926143741541](../imgs/image-20210926143741541.png)
 
 这个时候事务A再次查询，就会发现一个问题，那就是此时的数据行里面的trx_id=59了，不是32了，那个这个trx_id是大于ReadView里的min_tx_id(45),同时小于ReadView的max_trx_id（60）的，这就说明更新这条数据的事务，很可能及时和自己差不多同时开启的，于是看一下这个trx_id(59)，是否在ReadView的m_ids列表里。
 
 这个时候，他是在的（45和59），直接证实，这个修改数据的事务是跟自己同一时段并发执行然后提交的，所以这行数据是不能查询的，如下图所示：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926144407630.png" alt="image-20210926144407630" style="zoom:50%;" />
+![image-20210926144407630](../imgs/image-20210926144407630.png)
 
 这个时候发现不能查，他就会顺着roll_pointer的undo log日志链条往下找，就会找到最近的一条undo log，trx_id是32，此时发现32是小于ReadView里的min_tx_id(45)的，说明这个undo log版本必然是在事务A开启之前就执行且提交的。
 
@@ -204,21 +204,21 @@ ReadView概念中有4个比较重要的内容：
 
 接着假设事务A自己更新了这行数据的值，改成值A，trx_id修改为45，同时保存之前事务B修改的值的快照，如下图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926145412295.png" alt="image-20210926145412295" style="zoom:50%;" />
+![image-20210926145412295](../imgs/image-20210926145412295.png)
 
 此时事务A来查询这条数据的值，发现trx_id和自己的是一样的，说明是自己修改的，自己修改的当然可以看到了。
 
 接着在事务A执行的过程中，突然开启了事务C,这个事务id是78，然后他更新了那行数据的值为值C，还提交了，如下图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926145734963.png" alt="image-20210926145734963" style="zoom:50%;" />
+![image-20210926145734963](../imgs/image-20210926145734963.png)
 
 这个时候事务A再去查询，会发现当前数据的trx_id=78，大于自己的ReadView中的max_trx_id（60）了，这就说明事务A开启之后，然后有一个事务更新了数据，自己当然看不到了，如图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926151356181.png" alt="image-20210926151356181" style="zoom:50%;" />
+![image-20210926151356181](../imgs/image-20210926151356181.png)
 
 此时就会顺着undio log版本链往下找，自己先找到值A自己之前修改过的那个版本，因为那个trx_id=45是跟自己的ReadView里的createor_trx_id是一样的，所以此时直接读取自己之前修改的那个版本，如下图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210926151622891.png" alt="image-20210926151622891" style="zoom:50%;" />
+![image-20210926151622891](../imgs/image-20210926151622891.png)
 
 这就是整套ReadView+undo log多版本链条的机制，通过这了机制，在你开启事务的时候产生一个ReadView，然后再由一个查询的时候，根据ReadView进行判断的机制，你就可以知道你应该读取那个版本的数据。
 
@@ -232,13 +232,13 @@ RC隔离级别实际上就是说在事务运行期间，只要别的事务修改
 
 假设有一行数据，是事务id=50的一个事务之前就插入进去的，然后现在，活跃着两个事务，一个是事务A(id=60)，一个是事务B(id=70)，如图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210927093222038.png" alt="image-20210927093222038" style="zoom:50%;" />
+![image-20210927093222038](../imgs/image-20210927093222038.png)
 
 现在的情况就是，事务B发起了一次update操作，更新了这条数据，把这个条数据的值修改为了值B，所以此时数据的trx_id会变成70，同时生成一个undo log，有roll_pointer指向，这个逻辑上面已经画过图，就不画，可参考上面的图理解。
 
 这个时候，事务A要发起一次查询操作，此时他一发起查询操作，就回生成一个ReadView，那么此时ReadView里面有min_trx_id=60、max_trx_id=70、creator_trx_id=60这几个，如图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210927094740938.png" alt="image-20210927094740938" style="zoom:50%;" />
+![image-20210927094740938](../imgs/image-20210927094740938.png)
 
 这个时候事务A发起查询，发现当前这条数据的trx_id=70，也就是说，属于ReadView的事务id范围之内，说明是他生成ReadView之前就有这个活跃的事务，是这个事务修改了这条数据的值，但是此时
 
@@ -246,7 +246,7 @@ RC隔离级别实际上就是说在事务运行期间，只要别的事务修改
 
 接着顺着undo log版本链条往下查找，就会找到一个初始值，发现它的trx_id是50，小于当前ReadView里的min_trx_id，说明是他生成ReadView之前，就有一个事务插入了这个值并且早就提交了，因此可以查询到这个初始值，如下图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210927094919469.png" alt="image-20210927094919469" style="zoom:50%;" />
+![image-20210927094919469](../imgs/image-20210927094919469.png)
 
 接着，就是说到RC隔离级别的重点了，假设事务B此时已经提交了，那么提交了就说明事务B不会活跃于数据库里了。一定需要清楚，事务B现在已经提交了，按照RC隔离级别的定义，事务B一旦提交，说明事务A下次再查询，就可以读到事务B修改过的值，因为事务B提交了。
 
@@ -254,7 +254,7 @@ RC隔离级别实际上就是说在事务运行期间，只要别的事务修改
 
 很简单，就是上面高亮的那句话，事务A下次发起查询时，再次生成一个ReadView。此时再生成ReadView，数据库内活跃的事务只有事务A了，因此min_trx_id是60，max_trx_id是71，但是m_ids这个活跃事务列表里，就只有一个60了，事务B的id=70不会出现在m_ids这个活跃事务列表里了，此时事务A再次基于这个ReadView去查询，会发现这条数据的trx_id=70，虽然在ReadView的min_trx_id和max_trx_id范围之间，但是此时并不在m_ids列表内，说明事务B在生成本次ReadView之前就已经提交了，那就说明这次查询可以查到事务B修改过的这个值了，此时事务A就会查询到值B。如下图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210927100304466.png" alt="image-20210927100304466" style="zoom:50%;" />
+![image-20210927100304466](../imgs/image-20210927100304466.png)
 
 这就是RC隔离级别是如果通过MVCC+ReadView+undo log多版本日志链条机制实现的。
 
@@ -270,21 +270,21 @@ RR隔离级别下，这个事务读一条数据，无论读多少次，都是一
 
 首先假设有一条是数据的事务id=5的一个事务插入的，同时此时有事务A(id=60)和事务B(id=70)同时运行，如图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210927093222038.png" alt="image-20210927093222038" style="zoom:50%;" />
+![image-20210927093222038](../imgs/image-20210927093222038.png)
 
 这个时候，事务A发起了一个查询，第一次查询就会生成一个ReadView，此时ReadView里的creator_trx_id是60，min_trx_id是60，m_ids是[60,70]，接着事务A基于这个ReadView去查这条数据，会发现这条数据的trx_id为50，是小于ReadView里的min_trx_id的，说明他发起查询之前，已经有事务查询这条数据并且提交了，所以此时可以查到这条数据。
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210927155552654.png" alt="image-20210927155552654" style="zoom:50%;" />
+![image-20210927155552654](../imgs/image-20210927155552654.png)
 
 接着事务B此时更新了这条数据的值为值B，此时会修改trx_id=70，同时生成一个undo log，而且关键是事务B此时还提交了，也就是说事务B已经结束了，如下图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210927155931805.png" alt="image-20210927155931805" style="zoom:50%;" />
+![image-20210927155931805](../imgs/image-20210927155931805.png)
 
 此时ReadView中的m_id还是[60,70]，因为上面的高亮红字说过了，在RR隔离级别下，在第一次读取数据时生成一个ReadView，一旦生成就不会再变了，这个时候虽然事务B已经结束了，但是事务A的 ReadView里，还是会有60，70两个事务id。就是说事务A去查询的时候，事务B当时是在运行的，然后事务A查询的时候，会发现trx_id是70，70一方面在min_trx_id和max_trx_id这个范围区间中，同时还在m_ids列表中。
 
 这就说明了起码在事务A开启查询的时候，id为70的这个事务B还是在运行的，然后由这个事务B更新了这条数据，所以此时事务A是不能查询到事务B更新的这个值的，因此这个时候继续顺着指针往历史版本链条上去找，如下图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210927161440800.png" alt="image-20210927161440800" style="zoom:50%;" />
+![image-20210927161440800](../imgs/image-20210927161440800.png)
 
 往下找就找到了trx_id=50的这条数据，50是小于ReadView的min_trx_id的，说明在他开启查询之前，就已经提交了这个事务了，所以可以查询到，图就不画了，理解到就可以了。
 
@@ -292,7 +292,7 @@ RR隔离级别下，这个事务读一条数据，无论读多少次，都是一
 
 还有一个幻读的问题，假设现在事务A用 select * from x where id > 10 来查询，此时可能查到的就是一条数据，而且读到的这条数据就是初始值那个版本，原因上面说过了。假设现在有一个事务C插入了一条数据，然后提交了，如下图：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210927163939142.png" alt="image-20210927163939142" style="zoom:50%;" />
+![image-20210927163939142](../imgs/image-20210927163939142.png)
 
 这个时候，事务A再此查询，此时会发现符合条件的有2条数据，一条是原始值那个数据，一条是事务C插入的那条数据，但是事务C插入的那条数据的trx_id是80，这个80大于自己ReadView的max_trx_id的，说明是自己发起查询之后，这个事务才启动的，所以次数这条数据是不能查询的。
 

@@ -14,7 +14,7 @@ mysql在启动的时候，会向操作系统申请一片连续的内存，这个
 
 ## Buffer Pool 的内部组成
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210811191908129.png" alt="image-20210811191908129" style="zoom:50%;" />
+![image-20210811191908129](../imgs/image-20210811191908129.png)
 
 上面这幅图可以大概说出Buffer Pool的内部组成，为了更好的管理缓冲池，mysql设计的时候将为每一个缓冲池（其实就是一个缓存页，大小和数据页一样也是16KB）创建了一些控制信息，这些信息包括该页所属的表空间编号、页号、缓存页在`Buffer Pool`中的地址、链表节点信息、一些锁信息以及`LSN`信息。
 
@@ -33,7 +33,7 @@ mysql在启动的时候，会向操作系统申请一片连续的内存，这个
 
 free链表是一个双向链表，每个节点就是一个空闲的缓冲页的描述数据块的地址，也就是说，只要有一个缓冲页是空闲的，那么他的数据块就会放入这个链表中。刚刚完成初始化的`Buffer Pool`中所有的缓存页都是空闲的，所以每一个缓存页对应的控制块都会被加入到`free链表`中，假设该`Buffer Pool`中可容纳的缓存页数量为`n`，那增加了`free链表`的效果图就是这样的：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210811193256927.png" alt="image-20210811193256927" style="zoom:50%;" />
+![image-20210811193256927](../imgs/image-20210811193256927.png)
 
 从图中可以看出，为了管理好这个`free链表`，特意为这个链表定义了一个`基节点`，里边儿包含着链表的头节点地址，尾节点地址，以及当前链表中节点的数量等信息。这里需要注意的是，链表的基节点占用的内存空间并不包含在为`Buffer Pool`申请的一大片连续内存空间之内，而是单独申请的一块内存空间。
 
@@ -57,7 +57,7 @@ free链表是一个双向链表，每个节点就是一个空闲的缓冲页的�
 
 凡是修改过的数据都会被加入到这个链表中，因为它们都属于脏页，后续都要被刷回到磁盘的。flush链表的构造和`free链表`差不多，假设某个时间点`Buffer Pool`中的脏页数量为`n`，那么对应的`flush链表`就长这样：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210812190919789.png" alt="image-20210812190919789" style="zoom:50%;" />
+![image-20210812190919789](../imgs/image-20210812190919789.png)
 
 ## LRU 链表的管理
 
@@ -108,7 +108,7 @@ free链表是一个双向链表，每个节点就是一个空闲的缓冲页的�
 
   大概就是这个样子：
 
-  <img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210812193708971.png" alt="image-20210812193708971" style="zoom:50%;" />
+![image-20210812193708971](../imgs/image-20210812193708971.png)
 
   需要特别注意的一点就是：按照某个比例将LRU链表分成两半的，不是某些节点固定是young区域的，某些节点固定是old区域的，随着程序的运行，某个节点所属的区域也可能发生变化。可以通过查看系统变量`innodb_old_blocks_pct`的值来确定old区域在LRU链表中所占的比例：
 
@@ -181,7 +181,7 @@ free链表是一个双向链表，每个节点就是一个空闲的缓冲页的�
 
 首先需要明确的就是生产环境都是多线程的，也就是有多个请求来访问Mysql(就是访问Buffer Pool)，那必然需要加锁，让一个线程先完成一系列操作，比如加载数据页到缓存页，更新free链表，更新l RU链表，然后释放锁，结下下一个线程再执行一系列操作。
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210812200821956.png" alt="image-20210812200821956" style="zoom:50%;" />
+![image-20210812200821956](../imgs/image-20210812200821956.png)
 
 如果加锁性能肯定会变差，但是需要明确一下，需要看程度，能不能接受，其实在缓冲池里面，是基于内存操作的，即便是加锁串行来执行也不会太差，但是还是会有优化的方案，那就是配置多个Buffer Pool来提升并发能力。可以在服务器启动的时候通过设置`innodb_buffer_pool_instances`的值来修改`Buffer Pool`实例的个数：
 
@@ -192,7 +192,7 @@ innodb_buffer_pool_instances = 2
 
 这个时候就有两个Buffer Pool示例了，假如多个线程并发来访问，有的线程去访问这个，有的线程去访问另一个，就可以把压力分散开来了。
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210812201534098.png" alt="image-20210812201534098" style="zoom:50%;" />
+![image-20210812201534098](../imgs/image-20210812201534098.png)
 
 所以就是一旦有多个Buffer Pool示例，线程并发访问的性能就会得到成倍的提升。不过也不是说`Buffer Pool`实例创建的越多越好，分别管理各个`Buffer Pool`也是需要性能开销的，一般这样的规定：当innodb_buffer_pool_size的值小于1G的时候设置多个实例是无效的，InnoDB会默认把innodb_buffer_pool_instances 的值修改为1。而一般在`Buffer Pool`大于或等于1G的时候设置多个`Buffer Pool`实例来提高并发的性能。
 
@@ -200,7 +200,7 @@ innodb_buffer_pool_instances = 2
 
 `MySQL 5.7.5`之前，`Buffer Pool`的大小只能在服务器启动时通过配置`innodb_buffer_pool_size`启动参数来调整大小，在服务器运行过程中是不允许调整该值的。在`5.7.5`以后的版本中支持了在服务器运行过程中调整`Buffer Pool`大小的功能，但是有一个问题，就是每次要重新调整`Buffer Pool`大小时，都需要重新向操作系统申请一块连续的内存空间，然后将旧的`Buffer Pool`中的内容复制到这一块新空间，这是极其耗时的。所以InnDB的做法是决定不再一次性为某个`Buffer Pool`实例向操作系统申请一大片连续的内存空间，而是以一个所谓的`chunk`为单位向操作系统申请空间。也就是说一个`Buffer Pool`实例其实是由若干个`chunk`组成的，一个`chunk`就代表一片连续的内存空间，里边儿包含了若干缓存页与其对应的控制块。大概就是这样：
 
-<img src="/Users/guogoffy/Library/Application Support/typora-user-images/image-20210812202405738.png" alt="image-20210812202405738" style="zoom:50%;" />
+![image-20210812202405738](../imgs/image-20210812202405738.png)
 
 上图代表的`Buffer Pool`就是由2个实例组成的，每个实例中又包含2个`chunk`。
 
