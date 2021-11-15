@@ -79,9 +79,283 @@ Redis 不可能时时刻刻遍历所有被设置了生存时间的 key，来检�
 2. 4个方面（LRU、LFU、random、ttl）
 3. 8个方案
 
-### LRU
+### 1、LRU（重点学习）
 
-### LFU
+#### 什么是LRU
+
+以内存访问为例解释缓存的工作原理。假设缓存的大小固定，初始状态为空，每发生一次读内存操作，首先查找待读取的数据是否存在于缓存中，若是，则缓存命中，返回数据；若不是，则缓存未命中，从内存中读取数据，并把该数据添加到缓存中。
+
+向缓存中添加数据时，如果缓存已满，则需要删除访问时间最早的那条数据，这种更新缓存的办法就叫LRU（Least Recently Used）。
+
+#### 核心思想
+
+最近使用的数据很大概率将会再次被使用。而最近一段时间都没有使用的数据，很大概率不会再使用。
+
+#### 时间复杂度
+
+LRU最需要关注的就是读性能和写性能，理想的LRU应该可以在O(1)的时间内读取一条数据或更新一条数据，也就是说读写的时间复杂度都是O(1)。
+
+可以想到HashMap，根据数据的键访问数据可以达到O(1)的速度，但是更新缓存的速度无法达到O(1)，因为需要确定那一条数据的访问时间最早，就需要遍历所有缓存才能找到。
+
+因此需要一种既按访问时间排序，又能在常数时间内随机访问的数据结构。
+
+#### 实现逻辑
+
+通过HashMap+双链表的思想来实现。
+
+HashMap保证通过Key访问数据的时间为O(1)，双向链表则按照访问时间的顺序依次穿过每个数据。之所以选择双向链表而不是单链表，是为了可以从中间任意节点修改链表结构，而不必从头节点开始遍历。
+
+#### 实现代码
+
+```java
+/**
+ * Created with IntelliJ IDEA.
+ *
+ * @Author: GuoFei
+ * @Date: 2021/11/15/15:18
+ * @Description: LRU（Least Recently Used） 缓存算法
+ * 使用HashMap + 双向列表实现，使得get和put的时间复杂度达到O(1)
+ * get:读缓存时从HashMap中查找key
+ * put:更新缓存时同时更新HashMap和双向链表，双向链表始终按照访问顺序排列
+ *
+ */
+public class LRUCache {
+
+
+    /**
+     * 构造函数
+     * @param capacity
+     */
+    public LRUCache(int capacity) {
+        this.capacity = capacity;
+        this.map = new HashMap<>((int)(capacity / 0.75 + 1), 0.75f);
+        this.head = new Entry(0, 0);
+        this.tail = new Entry(0, 0);
+        head.next = tail;
+        tail.prev = head;
+    }
+
+    /**
+     * 缓存容量
+     */
+    private final int capacity;
+    /**
+     * 用于O(1)访问到的缓存的HashMap
+     */
+    private HashMap<Integer,Entry> map;
+    /**
+     * 双向链表头节点，这边的缓存项访问时间较早
+     */
+    private Entry head;
+    /**
+     * 双向链表尾节点，这边的缓存项访问时间较新
+     */
+    private Entry tail;
+
+
+    /**
+     * 从缓存中获取key对应的值，若未命中则返回-1,如果命中，调整节点位置
+     * @param key
+     * @return
+     */
+    public int get(int key){
+        if (map.containsKey(key)){
+            Entry entry = map.get(key);
+            popToTail(entry);
+            return entry.value;
+        }
+        return -1;
+    }
+
+    /**
+     * 向缓存中插入或更新值
+     * @param key 待更新的键
+     * @param value 待更新的值
+     */
+    public void put(int key,int value){
+        if (map.containsKey(key)){
+            Entry entry = map.get(key);
+            entry.value = value;
+            popToTail(entry);
+        }else{
+            Entry newEntry = new Entry(key, value);
+            if (map.size() >= capacity){
+                Entry entry = removeFirst();
+                map.remove(entry.key);
+            }
+            addToTail(newEntry);
+            map.put(key,newEntry);
+        }
+    }
+
+
+    /**
+     * 缓存项的包装类 包含键、值、前驱结点、后继结点
+     */
+    class Entry{
+        /**
+         * 键
+         */
+        int key;
+        /**
+         * 值
+         */
+        int value;
+        /**
+         * 前驱结点
+         */
+        Entry prev;
+        /**
+         * 后继结点
+         */
+        Entry next;
+        Entry(int key,int value){
+            this.key = key;
+            this.value = value;
+        }
+    }
+
+    /**
+     * 将entry结点移动到链表末端
+     * @param entry
+     */
+    private void popToTail(Entry entry){
+        Entry prev = entry.prev;
+        Entry next = entry.next;
+        prev.next = next;
+        next.prev = prev;
+        Entry last = tail.prev;
+        last.next = entry;
+        tail.prev = entry;
+        entry.prev = last;
+        entry.next = tail;
+    }
+
+    /**
+     * 添加entry结点到链表末端
+     * @param entry
+     */
+    private void addToTail(Entry entry) {
+        Entry last = tail.prev;
+        last.next = entry;
+        tail.prev = entry;
+        entry.prev = last;
+        entry.next = tail;
+    }
+
+    /**
+     * 移除链表首端的结点
+     * @return
+     */
+    private Entry removeFirst() {
+        Entry first = head.next;
+        Entry second = first.next;
+        head.next = second;
+        second.prev = head;
+        return first;
+    }
+
+    /**
+     * 测试程序，访问顺序为[[1,1],[2,2],[1],[3,3],[2],[4,4],[1],[3],[4]]，其中成对的数调用put，单个数调用get。
+     * get的结果为[1],[-1],[-1],[3],[4]，-1表示缓存未命中，其它数字表示命中。
+     * @param args
+     */
+    public static void main(String[] args) {
+        LRUCache cache = new LRUCache(2);
+        cache.put(1,1);
+        cache.put(2,2);
+        System.out.println(cache.get(1));
+        cache.put(3, 3);
+        System.out.println(cache.get(2));
+        cache.put(4, 4);
+        System.out.println(cache.get(1));
+        System.out.println(cache.get(3));
+        System.out.println(cache.get(4));
+    }
+}
+```
+
+当然，JDK（HashMap）也自带了LRU淘汰算法，可以重写下removeEldestEntry()方法即可。
+
+```java
+/**
+ * Created with IntelliJ IDEA.
+ *
+ * @Author: GuoFei
+ * @Date: 2021/11/15/16:03
+ * @Description: 继承JDK（HashMap）自带的 removeEldestEntry()方法
+ */
+public class LRUCacheLinkedHashMap {
+    private LinkedHashMap<Integer, Integer> map;
+    private final int capacity;
+
+    public LRUCacheLinkedHashMap(int capacity) {
+        this.map = new LinkedHashMap<Integer, Integer>(capacity, 0.75f, true){
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Integer, Integer> eldest) {
+                //return super.removeEldestEntry(eldest);
+                return size()>capacity;
+            }
+        };
+        this.capacity = capacity;
+    }
+    public int get(int key){
+        return map.getOrDefault(key, -1);
+    }
+    public void put(int key, int value){
+        map.put(key, value);
+    }
+
+    public static void main(String[] args) {
+        LRUCacheLinkedHashMap cache = new LRUCacheLinkedHashMap(2);
+        cache.put(1,1);
+        cache.put(2,2);
+        System.out.println(cache.get(1));
+        cache.put(3, 3);
+        System.out.println(cache.get(2));
+        cache.put(4, 4);
+        System.out.println(cache.get(1));
+        System.out.println(cache.get(3));
+        System.out.println(cache.get(4));
+    }
+}
+```
+
+#### 存在的问题
+
+缓存污染：如果某个客户端访问大量历史数据时，可能使缓存中的数据被这些历史数据替换，其他客户端访问数据的命中率大大降低。
+
+### 2、LFU
+
+#### 什么是LFU
+
+最近最不常用算法,根据数据的历史访问频率来淘汰数据，这种淘汰缓存的策略就是LFU（Least Frequently Used）。
+
+#### 核心思想
+
+最近使用频率高的数据很大概率将会再次被使用,而最近使用频率低的数据,很大概率不会再使用（有点类似于马太效应）。
+
+#### 存在的问题
+
+某些数据短时间内被重复引用，并且在很长一段时间内不再被访问。由于它的访问频率计数急剧增加，即使它在相当长的一段时间内不会被再次使用，也不会在短时间内被淘汰。这使得其他可能更频繁使用的块更容易被清除，此外，刚进入缓存的新项可能很快就会再次被删除，因为它们的计数器较低，即使之后可能会频繁使用。
+
+### 3、ARC
+
+自适应缓存替换算法,它结合了LRU与LFU,来获得可用缓存的最佳使用（Adaptive Replacement Cache）。
+
+当时访问的数据趋向于访问最近的内容，会更多地命中LRU list，这样会增大LRU的空间； 当系统趋向于访问最频繁的内容，会更多地命中LFU list，这样会增加LFU的空间。
+
+### 4、FIFO
+
+先进先出算法,最先进入的数据,最先被淘汰
+
+最近刚访问的，将来访问的可能性比较大 ,如果一个数据最先进入缓存中，则应该最早淘汰掉。
+
+这种绝对的公平方式容易导致效率的降低。例如，如果最先加载进来的页面是经常被访问的页面，这样做很可能造成常被访问的页面替换到磁盘上，导致很快就需要再次发生缺页中断，从而降低效率。
+
+### 5、2Q
+
+有两个缓存队列，一个是FIFO队列，一个是LRU队列。当数据第一次访问时，2Q算法将数据缓存在FIFO队列里面，当数据第二次被访问时，则将数据从FIFO队列移到LRU队列里面，两个队列各自按照自己的方法淘汰数据。
 
 
 
