@@ -1,2 +1,2 @@
 # git_blog
-这个仓库主要存放我平时的读书笔记、总结的技术博客。
+This warehouse mainly stores my usual reading notes and summarized technical blogs.
