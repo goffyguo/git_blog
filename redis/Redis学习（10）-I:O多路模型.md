@@ -323,5 +323,15 @@ public static void main() {
 
 当然，异步可以配合回调机制，但这就和同步异步本身的区别没啥关系了，添枝加叶的东西而已。
 
+关于同步、异步、阻塞、非阻塞的一些资料
+
+[交流｜阻塞非阻塞与同步异步的区别是什么？ - 力扣（LeetCode） (leetcode-cn.com)](https://leetcode-cn.com/circle/discuss/uHGOZo/)
+
+[怎样理解阻塞非阻塞与同步异步的区别？ - 知乎 (zhihu.com)](https://www.zhihu.com/question/19732473)
+
 ## IO 多路复用
+
+[ IO多路复用到底是不是异步的？ - 知乎 (zhihu.com)](https://www.zhihu.com/question/59975081/answer/1932776593)
+
+[I/O多路复用技术（multiplexing）是什么？ - 知乎 (zhihu.com)](https://www.zhihu.com/question/28594409/answer/74003996)
 
