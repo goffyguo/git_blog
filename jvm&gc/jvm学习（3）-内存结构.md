@@ -574,6 +574,8 @@ static final，被声明为final的类变量的处理方法则不同，每个全
   - 字段的方法和描述符
   - 方法的名称和描述符
 
+讲解元空间很好的文章 https://www.javadoop.com/post/metaspace
+
 ### 内存结构小结
 
 ![image-20211130133749592](imgs/image-20211130133749592.png)
