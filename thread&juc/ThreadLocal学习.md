@@ -435,3 +435,8 @@ ThreadLocalMap使用ThreadLocal的弱引用作为key，如果一个ThreadLocal�
 - ThreadLocalMap的Entry对ThreadLocal的引用为弱引用，避免了ThreadLocal对象无法被回收的问题
 - 通过expungeStaleEntry，cleanSomeSlots,replaceStaleEntry这三个方法回收键为null的Entry对象的值以及Entry对象本身从从而防止内存泄漏，属于更加坚固的方法。
 - 平时使用一定注意Remove()，尤其是在线程池的使用场景下。
+
+## 比较好的文章
+
+https://mp.weixin.qq.com/s/76lIW4ia8D90Htoyg2NJpw
+
