@@ -1,3 +1,5 @@
+
+
 ## AQS理论初步
 
 AbstractQueuedSynchronizer 抽象队列同步器
@@ -47,11 +49,14 @@ CLH：Craig、Landin and Hagersten队列，是一个单向链表，AQS中的队�
 
 有阻塞就需要排队，实现排队必然需要队列
 
-AQS使用一个volatile的int类型的成员变量来表示同步状态，通过内置的FIFO队列来完成资源获取的排队工作将每条要去抢占资源的线程封装成一个Node，节点来实现锁的分配，通过CAS完成对State值的修改。
+AQS使用一个volatile的int类型的成员变量来表示同步状态，通过内置的FIFO队列来完成资源获取的排队工作将每条要去抢占资源的线程封装成一个Node节点来实现锁的分配，通过CAS完成对State值的修改。
 
 ### AQS 自身
 
-AQS的int变量 - AQS的同步状态state成员变量
+AQS的int变量
+
+- AQS的同步状态state成员变量
+- 零就是没人，自由状态可以办理;大于等于1，有人占用窗口，等着去
 
 ```java
 public abstract class AbstractQueuedSynchronizer
@@ -70,8 +75,8 @@ public abstract class AbstractQueuedSynchronizer
 
 AQS的CLH队列
 
-- CLH队列(三个大牛的名字组成)，为一个双向队列
-- 银行候客区的等待顾客
+- CLH队列(三个大牛的名字组成)，，默认为一个单向链表，AQS修改为了一个双向队列。
+- 银行候客区的等待顾客。
 
 > The wait queue is a variant of a “CLH” (Craig, Landin, and Hagersten) lock queue. CLH locks are normally used forspinlocks. We instead use them for blocking synchronizers, butuse the same basic tactic of holding some of the controlinformation about a thread in the predecessor of its node. A"status" field in each node keeps track of whether a threadshould block. A node is signalled when its predecessorreleases. Each node of the queue otherwise serves as aspecific-notification-style monitor holding a single waiting thread. The status field does NOT control whether threads aregranted locks etc though. A thread may try to acquire if it isfirst in the queue. But being first does not guarantee success;it only gives the right to contend. So the currently releasedcontender thread may need to rewait.
 >
@@ -166,7 +171,449 @@ public abstract class AbstractQueuedSynchronizer
 
 CLH：Craig、Landin and Hagersten 队列，是个单向链表，AQS中的队列是CLH变体的虚拟双向队列（FIFO）
 
-## 源码分析
+![image-20211220140832411](imgs/image-20211220140832411.png)
+
+## 源码分析（ReentrantLock）
+
+![image-20211220140043093](imgs/image-20211220140043093.png)
+
+```java
+ReentrantLock reentrantLock = new ReentrantLock();
+```
+
+Lock接口的实现类，基本都是通过聚合了一个队列同步器的子类（sync）完成线程访问控制的。
+
+### 公平锁和非公平锁
+
+```java
+@ReservedStackAccess
+final boolean nonfairTryAcquire(int acquires) {
+      final Thread current = Thread.currentThread();
+      int c = getState();
+      if (c == 0) {
+        if (compareAndSetState(0, acquires)) {
+          setExclusiveOwnerThread(current);
+          return true;
+        }
+      }
+      else if (current == getExclusiveOwnerThread()) {
+        int nextc = c + acquires;
+        if (nextc < 0) // overflow
+          throw new Error("Maximum lock count exceeded");
+        setState(nextc);
+        return true;
+      }
+      return false;
+    }
+```
+
+```java
+@ReservedStackAccess
+protected final boolean tryAcquire(int acquires) {
+  final Thread current = Thread.currentThread();
+  int c = getState();
+  if (c == 0) {
+    if (!hasQueuedPredecessors() &&
+        compareAndSetState(0, acquires)) {
+      setExclusiveOwnerThread(current);
+      return true;
+    }
+  }
+  else if (current == getExclusiveOwnerThread()) {
+    int nextc = c + acquires;
+    if (nextc < 0)
+      throw new Error("Maximum lock count exceeded");
+    setState(nextc);
+    return true;
+  }
+  return false;
+}
+```
+
+可以明显看出公平锁与非公平锁的lock()方法唯一的区别就是在于公平锁在获取状态时多了一个限制条件hasQueuedPredecessors()，这个条件的作用是判断等待队列中是否存在有效节点的方法。
+
+```java
+public final boolean hasQueuedPredecessors() {
+        // The correctness of this depends on head being initialized
+        // before tail and on head.next being accurate if the current
+        // thread is first in queue.
+        Node t = tail; // Read fields in reverse initialization order
+        Node h = head;
+        Node s;
+        return h != t &&
+            ((s = h.next) == null || s.thread != Thread.currentThread());
+    }
+```
+
+### 从ReentrantLock的非公平锁开始
+
+带入一个银行办理业务的案例来模拟AQS如何进行线程的管理和通知唤醒机制，从非公平锁开始进入。
+
+```java
+public static void main(String[] args) {
+
+        ReentrantLock lock = new ReentrantLock();
+
+        //3个线程模拟3个人来银行网点，受理窗口办理业务的顾客
+        new Thread(()->{
+            lock.lock();
+            try {
+                System.out.println("------A thread come in");
+                try { TimeUnit.MINUTES.sleep(20); } catch (InterruptedException e) { e.printStackTrace(); }
+            }finally {
+                lock.unlock();
+            }
+        },"A").start();
+
+        new Thread(()->{
+            lock.lock();
+            try {
+                System.out.println("------B thread come in");
+            }finally {
+                lock.unlock();
+            }
+        },"B").start();
+
+        new Thread(()->{
+            lock.lock();
+            try {
+                System.out.println("------C thread come in");
+            }finally {
+                lock.unlock();
+            }
+        },"C").start();
+    }
+```
+
+图示：
+
+![image-20211221095708318](imgs/image-20211221095708318.png)
+
+#### 加锁
+
+```java
+// 调用了sync这个内部类的lock方法，所有的API层面的lock实际上都是sync这个内部类实现的
+public void lock() {
+        sync.lock();
+    }
+// 可以发现Sync继承了AQS
+ abstract static class Sync extends AbstractQueuedSynchronizer {
+        private static final long serialVersionUID = -5179523762034025860L;
+
+        /**
+         * Performs {@link Lock#lock}. The main reason for subclassing
+         * is to allow fast path for nonfair version.
+         */
+        abstract void lock();
+   。。。
+ }
+// AQS的抽象类
+public abstract class AbstractQueuedSynchronizer
+    extends AbstractOwnableSynchronizer
+    implements java.io.Serializable {
+  。。。
+}
+```
+
+整个ReentrantLock的加锁阶段，可以分为三个阶段：
+
+1. 尝试加锁
+2. 加锁失败、线程进入队列
+3. 线程进入队列后，进入阻塞状态
+
+```java
+@ReservedStackAccess
+				// 争锁
+        final void lock() {
+          // 比较并设置，A线程第一个进来，此时state是默认值0，所以设置成功，此时A线程抢到锁，进入银行受理窗口办理业务。这个时候state的值被CAS成了1
+            if (compareAndSetState(0, 1))
+              // 设置占用这个锁的线程，把这个值设置为当前线程，也就是占用了此时的银行受理窗口，
+                setExclusiveOwnerThread(Thread.currentThread());
+            else
+                acquire(1);
+        }
+```
+
+此时，A线程占用窗口办理业务，这个时候B线程进来，走上面的逻辑发现进不了if，只能走else，所以进入`acquire(1)`。
+
+> 这里有一个值得学习的地方：模版设计模式。
+>
+> 把顶层的设计放到足够高，把底层的实现放的足够低，抛出异常来限制子类的实现。逼迫子类必须实现这个方法，否则就会返回错误
+
+```java
+@ReservedStackAccess
+    public final void acquire(int arg) {
+      // 根据下面的nonfairTryAcquire分析，tryAcquire(arg)会返回false,取反返回true.
+        if (!tryAcquire(arg) &&
+            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+            selfInterrupt();
+    }
+
+// 模版设计模式
+protected boolean tryAcquire(int arg) {
+        throw new UnsupportedOperationException();
+    }
+
+//----------------nonfairTryAcquire----------------------
+@ReservedStackAccess
+// 非公平锁TryAcquire(
+        final boolean nonfairTryAcquire(int acquires) {
+            final Thread current = Thread.currentThread();
+          // 获取当前的state=1，说明已经有线程在占用（A）
+            int c = getState();
+          //不进入
+            if (c == 0) {
+              // 有一种可能就是B刚刚要进去，A走了，所以B这个时候运气比较好是可以抢到锁的。所以会走这里
+                if (compareAndSetState(0, acquires)) {
+                    setExclusiveOwnerThread(current);
+                    return true;
+                }
+            }
+          // 不进入，当前线程是B,getExclusiveOwnerThread的线程是A
+            else if (current == getExclusiveOwnerThread()) {
+              // 如果当前线程等于抢到锁的这个线程，就说明还是之前（A）抢到锁的线程又抢到锁了，那就是重入了，所以+1
+                int nextc = c + acquires;
+                if (nextc < 0) // overflow
+                    throw new Error("Maximum lock count exceeded");
+              // 设置这个state
+                setState(nextc);
+                return true;
+            }
+          //走这个
+            return false;
+        }
+//------------------nonfairTryAcquire-------------------------
+
+//-------------------addWaiter-----------------------------
+// 传进来的Node.EXCLUSIVE排他的，
+ private Node addWaiter(Node mode) {
+   // 这个node就是线程B
+        Node node = new Node(Thread.currentThread(), mode);
+        // Try the fast path of enq; backup to full enq on failure
+   // 现在还没有线程排在阻塞区，这个时候tail = null,进入enq(node)这个方法。
+        Node pred = tail;
+        if (pred != null) {
+            node.prev = pred;
+            if (compareAndSetTail(pred, node)) {
+                pred.next = node;
+                return node;
+            }
+        }
+   // 此时到这一步B线程就进入阻塞队列（等候区）了
+        enq(node);
+        return node;
+    }
+//-------------------addWaiter-----------------------------
+
+//--------- enq(node)-------------------
+private Node enq(final Node node) {
+  // 自旋，node进来的是B节点
+        for (;;) {
+            Node t = tail;
+          // 尾指针为null
+            if (t == null) { // Must initialize
+              // 此时这个node是系统新new了一个出来，并不是传进来的B线程，新建一个node,把它作为头节点，一般被成为傀儡节点或者哨兵节点，用来占位，waitState=默认值0
+                if (compareAndSetHead(new Node()))
+                  // 这句代码的意思就是说把head指向这个傀儡节点，把tail节点也指向这个傀儡节点
+                    tail = head;
+            } else {
+              // B节点真正的入队，B节点的前指针指向这个傀儡节点
+                node.prev = t;
+              // 比较并交换，把尾节点指向B节点
+                if (compareAndSetTail(t, node)) {
+                  // 傀儡节点的下一个节点指向B节点
+                    t.next = node;
+                    return t;
+                }
+            }
+        }
+    }
+//--------- enq(node)-------------------
+```
+
+接着分析：C线程还是会如法炮制，走这些逻辑。唯一不同的是C进入的时候已经有Bnode了，所有指针转换那里也会稍有不同。这样的话等候区里面就连成了一个队列。
+
+```java
+public final void acquire(int arg) {
+      // 根据下面的nonfairTryAcquire分析，tryAcquire(arg)会返回false,取反返回true.
+        if (!tryAcquire(arg) && acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+            selfInterrupt();
+    }
+
+//-----------acquireQueued--------------------
+@ReservedStackAccess
+    final boolean acquireQueued(final Node node, int arg) {
+        boolean failed = true;
+        try {
+            boolean interrupted = false;
+          // 自旋
+            for (;;) {
+              // 返回队列的第一个prev节点，此时就是返回傀儡节点
+                final Node p = node.predecessor();
+              // 头节点是傀儡节点，所以p == head true，走后面再接tryAcquire失败不进去
+              // 如果抢占成功 进入
+                if (p == head && tryAcquire(arg)) {
+                  // 
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return interrupted;
+                }
+              // 自旋shouldParkAfterFailedAcquire(p, node) = true,走后面
+              // parkAndCheckInterrupt 会卡在这，等待唤醒
+                if (shouldParkAfterFailedAcquire(p, node) && parkAndCheckInterrupt())
+                    interrupted = true;
+            }
+        } finally {
+            if (failed)
+                cancelAcquire(node);
+        }
+    }
+
+//----------------shouldParkAfterFailedAcquire------------------
+// 传进来的两个参数分别为傀儡节点和B node
+private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+  // 傀儡节点的waitStatus = 0
+        int ws = pred.waitStatus;
+  // 0=-1 false
+        if (ws == Node.SIGNAL)
+            /*
+             * This node has already set status asking a release
+             * to signal it, so it can safely park.
+             */
+            return true;
+  //0>0  false
+        if (ws > 0) {
+            /*
+             * Predecessor was cancelled. Skip over predecessors and
+             * indicate retry.
+             */
+            do {
+                node.prev = pred = pred.prev;
+            } while (pred.waitStatus > 0);
+            pred.next = node;
+        } else {
+          // 进来
+            /*
+             * waitStatus must be 0 or PROPAGATE.  Indicate that we
+             * need a signal, but don't park yet.  Caller will need to
+             * retry to make sure it cannot acquire before parking.
+             */
+          // 比较并交换，waitStatus = -1
+            compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+        }
+  // 返回false
+        return false;
+    }
+
+//------------parkAndCheckInterrupt-------------
+private final boolean parkAndCheckInterrupt() {
+  // 被阻塞、正在排队等待中。。。B线程在这里被阻塞，等待unpark被唤醒
+        LockSupport.park(this);
+        return Thread.interrupted();
+}
+```
+
+以上就是加锁的逻辑
+
+#### 解锁
+
+```java
+public void unlock() {
+        sync.release(1);
+    }
+```
+
+```java
+@ReservedStackAccess
+    public final boolean release(int arg) {
+      // true 进来
+        if (tryRelease(arg)) {
+          // 
+            Node h = head;
+            if (h != null && h.waitStatus != 0)
+              // 唤醒
+                unparkSuccessor(h);
+            return true;
+        }
+        return false;
+    }
+
+//-------------tryRelease-----------------
+@ReservedStackAccess
+        protected final boolean tryRelease(int releases) {
+          // 1-1=0
+            int c = getState() - releases;
+            if (Thread.currentThread() != getExclusiveOwnerThread())
+                throw new IllegalMonitorStateException();
+            boolean free = false;
+            if (c == 0) {
+              // 进来
+                free = true;
+              // 设置当前窗口的占用线程为null
+                setExclusiveOwnerThread(null);
+            }
+            setState(c);
+            return free;
+        }
+
+//---------unparkSuccessor-------------
+//唤醒后继节点，从上面调用处知道，参数node是head头结点
+private void unparkSuccessor(Node node) {
+        /*
+         * If status is negative (i.e., possibly needing signal) try
+         * to clear in anticipation of signalling.  It is OK if this
+         * fails or if status is changed by waiting thread.
+         */
+        int ws = node.waitStatus;
+  // 如果head节点当前waitStatus<0, 将其修改为0
+        if (ws < 0)
+          // 设置WaitStatus为0
+            compareAndSetWaitStatus(node, ws, 0);
+
+        /*
+         * Thread to unpark is held in successor, which is normally
+         * just the next node.  But if cancelled or apparently null,
+         * traverse backwards from tail to find the actual
+         * non-cancelled successor.
+         */
+  
+  			// B node
+  //下面的代码就是唤醒后继节点，但是有可能后继节点取消了等待（waitStatus==1）
+  //从队尾往前找，找到waitStatus<=0的所有节点中排在最前面的
+        Node s = node.next;
+        if (s == null || s.waitStatus > 0) {
+            s = null;
+            for (Node t = tail; t != null && t != node; t = t.prev)
+                if (t.waitStatus <= 0)
+                    s = t;
+        }
+        if (s != null)
+          // B node 要被唤醒，还记得前面说过B和C会被阻塞呢，这里就会唤醒，唤醒之后就会出队
+            LockSupport.unpark(s.thread);
+    }
+//--------------unparkSuccessor------------------
+```
+
+唤醒线程以后，被唤醒的线程将从以下代码中继续往前走：
+
+```java
+private final boolean parkAndCheckInterrupt() {
+    LockSupport.park(this); // 刚刚线程被挂起在这里了
+    return Thread.interrupted();
+}
+// 又回到这个方法了：acquireQueued(final Node node, int arg)，这个时候，node的前驱是head了
+```
+
+## 总结
+
+在并发环境下，加锁和解锁需要以下三个部件的协调：
+
+1. 锁状态。我们要知道锁是不是被别的线程占有了，这个就是 state 的作用，它为 0 的时候代表没有线程占有锁，可以去争抢这个锁，用 CAS 将 state 设为 1，如果 CAS 成功，说明抢到了锁，这样其他线程就抢不到了，如果锁重入的话，state进行 +1 就可以，解锁就是减 1，直到 state 又变为 0，代表释放锁，所以 lock() 和 unlock() 必须要配对啊。然后唤醒等待队列中的第一个线程，让其来占有锁。
+2. 线程的阻塞和解除阻塞。AQS 中采用了 LockSupport.park(thread) 来挂起线程，用 unpark 来唤醒线程。
+3. 阻塞队列。因为争抢锁的线程可能很多，但是只能有一个线程拿到锁，其他的线程都必须等待，这个时候就需要一个 queue 来管理这些线程，AQS 用的是一个 FIFO 的队列，就是一个链表，每个 node 都持有后继节点的引用。
+
+## 参考
 
 [一行一行源码分析清楚AbstractQueuedSynchronizer_Javadoop](https://www.javadoop.com/post/AbstractQueuedSynchronizer)
 
