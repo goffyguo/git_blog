@@ -32,3 +32,6 @@ Entity（实体）这个词在计算机领域的最初应用可能是来自于Pe
 - **业务模型/领域模型（Domain Model）：**指业务逻辑中，相关联的数据该如何联动。
 
 所以，解决这个问题的根本方案，就是要在代码里严格区分Data Model和Domain Model。在真实代码结构中，Data Model和 Domain Model实际上会分别在不同的层里，Data Model只存在于数据层，而Domain Model在领域层，而链接了这两层的关键对象，就是Repository。
+
+https://aquatic-message-03c.notion.site/63f13d0f5b1146a290533e128cc20aa3?v=6e07bc1baf374303ac5c852aa2efa15f
+

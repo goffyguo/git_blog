@@ -1,3 +1,7 @@
+[TOC]
+
+
+
 ## 什么是锁
 
 ”锁“本身是一个对象，synchronized这个关键字不是“锁”。硬要说的话，加synchronized仅仅是相当于“加锁”这个操作。
@@ -386,4 +390,10 @@ synchronized锁升级过程总结：一句话，就是先自旋，不行再阻�
 - ”锁“本身是一个对象，synchronized这个关键字不是“锁”。硬要说的话，加synchronized仅仅是相当于“加锁”这个操作。
 - synchronized 的性能变化（JDK1.6之前，重量级锁；1.6之后，优化）
 - synchronized 的锁种类以及锁升级（无锁->偏向锁->轻量级锁->重量级锁）
+
+好点的文章：
+
+https://mp.weixin.qq.com/s/y0srFUTsxZf8DRPNwPNqTQ
+
+
 
