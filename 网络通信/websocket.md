@@ -123,3 +123,18 @@ Long Polling长轮询是客户端和浏览器保持一个长连接，等服务�
 
 上边这两种方式都有个致命的弱点，开销太大，被动性。假设并发很高的话，这对服务端是个考验。
 而WebSocket一次握手，持久连接，以及主动推送的特点可以解决上边的问题，又不至于损耗性能。
+
+一些资源文章：
+
+[WebSocket详解（一）：初步认识WebSocket技术-网页端IM开发/专项技术区 - 即时通讯开发者社区! (52im.net)](http://www.52im.net/thread-331-1-1.html)
+
+[WebSocket详解（二）：技术原理、代码演示和应用案例-网页端IM开发/专项技术区 - 即时通讯开发者社区! (52im.net)](http://www.52im.net/thread-326-1-1.html)
+
+[WebSocket详解（三）：深入WebSocket通信协议细节-网页端IM开发/专项技术区 - 即时通讯开发者社区! (52im.net)](http://www.52im.net/thread-332-1-1.html)
+
+[WebSocket详解（四）：刨根问底HTTP与WebSocket的关系(上篇)-网页端IM开发/专项技术区 - 即时通讯开发者社区! (52im.net)](http://www.52im.net/thread-1258-1-1.html)
+
+[WebSocket详解（五）：刨根问底HTTP与WebSocket的关系(下篇)-网页端IM开发/专项技术区 - 即时通讯开发者社区! (52im.net)](http://www.52im.net/thread-1266-1-1.html)
+
+[WebSocket详解（六）：刨根问底WebSocket与Socket的关系-网页端IM开发/专项技术区 - 即时通讯开发者社区! (52im.net)](http://www.52im.net/thread-1273-1-1.html)
+
